@@ -1,0 +1,152 @@
+# Data Sources Configuration for PI-ERE
+
+# ACLED: Armed Conflict Location & Event Data Project
+acled:
+  enabled: true
+  api_key_env: ACLED_API_KEY  # Set this in .env file
+  base_url: https://api.acleddata.com/acled/read
+  update_frequency: weekly
+  event_types:
+    - Battles
+    - Explosions/Remote violence
+    - Violence against civilians
+    - Protests
+    - Riots
+    - Strategic developments
+  regions:
+    - Africa
+    - Middle East
+    - Asia
+    - Latin America
+
+# GDELT: Global Database of Events, Language, and Tone
+gdelt:
+  enabled: true
+  base_url: http://data.gdeltproject.org/events
+  update_frequency: daily
+  event_codes:
+    - "14"   # Protest
+    - "18"   # Assault
+    - "19"   # Fight
+    - "20"   # Use unconventional mass violence
+  tone_threshold: -5.0  # Negative tone filter
+
+# World Bank Indicators
+world_bank:
+  enabled: true
+  api_key_env: WORLD_BANK_API_KEY  # Optional, not always required
+  base_url: https://api.worldbank.org/v2
+  indicators:
+    gdp:
+      code: NY.GDP.MKTP.CD
+      name: GDP (current US$)
+    inflation:
+      code: FP.CPI.TOTL.ZG
+      name: Inflation, consumer prices (annual %)
+    unemployment:
+      code: SL.UEM.TOTL.ZS
+      name: Unemployment, total (% of total labor force)
+    governance:
+      code: PV.EST
+      name: Political Stability and Absence of Violence/Terrorism
+    regulatory_quality:
+      code: RQ.EST
+      name: Regulatory Quality
+    rule_of_law:
+      code: RL.EST
+      name: Rule of Law
+  update_frequency: quarterly
+
+# Commodity Prices
+commodities:
+  enabled: true
+  sources:
+    fred:
+      api_key_env: FRED_API_KEY
+      base_url: https://api.stlouisfed.org/fred/series/observations
+      series:
+        oil_wti:
+          id: DCOILWTICO
+          name: Crude Oil Prices - WTI
+        oil_brent:
+          id: DCOILBRENTEU
+          name: Crude Oil Prices - Brent
+        gold:
+          id: GOLDAMGBD228NLBM
+          name: Gold Fixing Price (London)
+        copper:
+          id: PCOPPUSDM
+          name: Global price of Copper
+        natural_gas:
+          id: PNGASEUUSDM
+          name: Global price of Natural Gas (EU)
+        coal:
+          id: PCOALAUUSDM
+          name: Global price of Coal (Australia)
+
+    yahoo_finance:
+      enabled: true
+      tickers:
+        - GC=F   # Gold Futures
+        - CL=F   # Crude Oil Futures
+        - HG=F   # Copper Futures
+        - NG=F   # Natural Gas Futures
+
+  update_frequency: daily
+
+# UCDP: Uppsala Conflict Data Program
+ucdp:
+  enabled: false  # Enable when ready to integrate
+  base_url: https://ucdp.uu.se/downloads
+  datasets:
+    - GED  # Georeferenced Event Dataset
+    - PRIO  # Armed Conflict Dataset
+  update_frequency: annual
+
+# Custom/Client Data Sources (for production deployments)
+custom:
+  enabled: false
+  internal_incidents:
+    enabled: false
+    source_type: database  # 'database', 'api', 'file'
+    connection_string_env: INTERNAL_DB_URL
+
+  supply_chain:
+    enabled: false
+    source_type: api
+    api_url_env: SUPPLY_CHAIN_API_URL
+    api_key_env: SUPPLY_CHAIN_API_KEY
+
+  satellite_imagery:
+    enabled: false
+    provider: planet  # 'planet', 'sentinel', 'landsat'
+    features:
+      - nighttime_lights
+      - infrastructure_changes
+      - vegetation_index
+
+# Data Quality & Validation
+data_quality:
+  max_missing_ratio: 0.3  # Maximum allowed missing data ratio
+  outlier_detection:
+    enabled: true
+    method: iqr  # 'iqr', 'zscore', 'isolation_forest'
+    threshold: 3.0
+
+  time_alignment:
+    granularity: daily  # 'daily', 'weekly', 'monthly'
+    timezone: UTC
+    backfill_method: forward_fill  # 'forward_fill', 'backward_fill', 'interpolate', 'zero'
+
+  validation_checks:
+    - check_date_gaps
+    - check_duplicate_records
+    - check_geographic_bounds
+    - check_value_ranges
+
+# Caching & Storage
+storage:
+  cache_enabled: true
+  cache_ttl: 86400  # seconds (24 hours)
+  raw_data_format: parquet  # 'parquet', 'csv', 'feather'
+  compression: snappy  # 'snappy', 'gzip', 'brotli', 'none'

@@ -1,0 +1,102 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Data directories (keep structure, ignore content)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/embeddings/*
+!data/embeddings/.gitkeep
+
+# Model artifacts
+models/*
+!models/.gitkeep
+*.pt
+*.pth
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.ckpt
+*.safetensors
+
+# Logs
+logs/
+*.log
+wandb/
+mlruns/
+.mlflow/
+
+# Testing
+.coverage
+.pytest_cache/
+.tox/
+htmlcov/
+.hypothesis/
+
+# Documentation
+docs/_build/
+site/
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Specific to this project
+checkpoints/
+outputs/
+reports/*.json
+reports/*.html
+!reports/.gitkeep

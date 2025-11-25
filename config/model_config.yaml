@@ -1,0 +1,339 @@
+# Model Configuration for PI-ERE
+
+# Embedding Models
+embedding:
+  # Time-Series Embedding (TS2Vec)
+  ts_embedding:
+    model_type: ts2vec
+    embedding_dim: 320
+    hidden_dim: 64
+    depth: 10  # Number of dilated conv layers
+    window_size: 30  # days
+    stride: 1
+    augmentation:
+      - jitter
+      - scaling
+      - time_warp
+    contrastive_loss: hierarchical
+    temperature: 0.2
+
+  # Text Embedding (for news/events)
+  text_embedding:
+    model_name: sentence-transformers/all-MiniLM-L6-v2
+    embedding_dim: 384
+    max_seq_length: 256
+    pooling: mean
+    normalize: true
+
+  # Fusion Strategy
+  fusion:
+    method: concatenate  # 'concatenate', 'cross_attention', 'weighted_sum'
+    output_dim: 512
+    projection_dropout: 0.1
+
+# Forecasting Models
+forecasting:
+  # Primary model
+  primary_model: chronos  # 'chronos', 'tft', 'informer', 'prophet', 'arima'
+
+  # Chronos (Amazon's Time Series Foundation Model)
+  chronos:
+    model_size: tiny  # 'tiny', 'mini', 'small', 'base', 'large'
+    prediction_length: 30  # forecast horizon in days
+    context_length: 365  # lookback window in days
+    num_samples: 100  # for probabilistic forecasts
+    temperature: 1.0
+    top_k: 50
+    top_p: 1.0
+
+  # Temporal Fusion Transformer
+  tft:
+    hidden_size: 64
+    lstm_layers: 2
+    attention_heads: 4
+    dropout: 0.1
+    hidden_continuous_size: 8
+    output_size: 7  # quantiles
+    loss: quantile
+    context_length: 365
+    prediction_length: 90
+    batch_size: 64
+    learning_rate: 0.001
+    max_epochs: 100
+    gradient_clip_val: 0.1
+
+  # Prophet (Meta's Forecasting Tool)
+  prophet:
+    growth: linear  # 'linear' or 'logistic'
+    seasonality_mode: multiplicative  # 'additive' or 'multiplicative'
+    changepoint_prior_scale: 0.05
+    seasonality_prior_scale: 10.0
+    holidays_prior_scale: 10.0
+    daily_seasonality: false
+    weekly_seasonality: true
+    yearly_seasonality: true
+    interval_width: 0.8
+
+  # Baseline: ARIMA
+  arima:
+    order: [2, 1, 2]  # (p, d, q)
+    seasonal_order: [1, 1, 1, 7]  # (P, D, Q, s) - weekly seasonality
+    trend: 'c'  # 'n', 'c', 't', 'ct'
+
+  # Ensemble configuration
+  ensemble:
+    enabled: true
+    models:
+      - chronos
+      - tft
+      - prophet
+    weights: [0.5, 0.3, 0.2]  # Must sum to 1.0
+    method: weighted_average  # 'weighted_average', 'median', 'voting'
+
+  # Risk Score Transformation
+  risk_scoring:
+    method: logistic  # 'logistic', 'linear', 'threshold'
+    threshold_low: 0.3
+    threshold_high: 0.7
+    calibration: isotonic  # 'isotonic', 'platt', 'none'
+
+# Anomaly Detection
+anomaly:
+  # Multi-method approach
+  methods:
+    residual_based:
+      enabled: true
+      metric: mae  # 'mae', 'mse', 'mape'
+      threshold_percentile: 95
+      window_size: 7  # days
+      min_duration: 3  # consecutive days
+
+    embedding_drift:
+      enabled: true
+      distance_metric: cosine  # 'cosine', 'euclidean', 'mahalanobis'
+      baseline_window: 90  # days to establish baseline
+      alert_threshold: 0.15  # cosine distance
+      smoothing_window: 5
+
+    isolation_forest:
+      enabled: true
+      n_estimators: 100
+      contamination: 0.05
+      max_features: 1.0
+      bootstrap: false
+
+    statistical:
+      enabled: true
+      methods:
+        - zscore
+        - iqr
+      zscore_threshold: 3.0
+      iqr_multiplier: 1.5
+
+  # Composite Scoring
+  composite:
+    aggregation: weighted_average  # 'weighted_average', 'max', 'voting'
+    weights:
+      residual_based: 0.3
+      embedding_drift: 0.4
+      isolation_forest: 0.2
+      statistical: 0.1
+
+  # Early Warning Configuration
+  early_warning:
+    lookback_window: 30  # days
+    escalation_pattern_length: 14  # days
+    alert_levels:
+      low: 0.3
+      medium: 0.5
+      high: 0.7
+      critical: 0.9
+    cooldown_period: 7  # days between repeated alerts
+
+# Vector Database for Similarity Search
+vector_db:
+  backend: qdrant  # 'qdrant', 'faiss', 'pgvector'
+
+  qdrant:
+    url: ${QDRANT_URL}  # From environment
+    api_key: ${QDRANT_API_KEY}
+    collection_name: pi_ere_embeddings
+    vector_size: 512
+    distance: Cosine  # 'Cosine', 'Euclid', 'Dot'
+    on_disk_payload: true
+    hnsw_config:
+      m: 16
+      ef_construct: 100
+
+  faiss:
+    index_type: IVF  # 'Flat', 'IVF', 'HNSW'
+    nlist: 100  # for IVF
+    nprobe: 10
+    metric: cosine  # 'cosine', 'l2', 'inner_product'
+
+  # Similarity Search
+  similarity:
+    top_k: 10
+    min_similarity: 0.7
+    time_decay_factor: 0.95  # exponential decay for older matches
+    geographic_boost: 1.2  # boost for same region
+    filters:
+      - same_event_type
+      - similar_magnitude
+
+# Training Configuration
+training:
+  device: auto  # 'auto', 'cpu', 'cuda', 'mps'
+  mixed_precision: true  # Use automatic mixed precision (AMP)
+  seed: 42
+
+  optimizer:
+    type: adamw  # 'adam', 'adamw', 'sgd'
+    learning_rate: 0.001
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+
+  scheduler:
+    type: cosine  # 'cosine', 'step', 'plateau', 'none'
+    warmup_steps: 100
+    min_lr: 0.00001
+
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.001
+    mode: min  # 'min' or 'max'
+
+  validation:
+    split: 0.2
+    method: temporal  # 'temporal', 'random', 'stratified'
+    cv_folds: 5  # for cross-validation
+
+  checkpointing:
+    enabled: true
+    save_top_k: 3
+    monitor: val_loss
+    mode: min
+
+  logging:
+    log_interval: 10  # steps
+    log_gradients: false
+    log_weights: false
+
+# Explainability & Interpretability
+explainability:
+  methods:
+    attention_weights:
+      enabled: true
+      normalize: true
+      top_k_features: 10
+
+    shap:
+      enabled: true
+      method: kernel  # 'kernel', 'tree', 'deep', 'gradient'
+      n_samples: 100
+      background_size: 50
+
+    feature_importance:
+      enabled: true
+      method: permutation  # 'permutation', 'drop_column', 'builtin'
+      n_repeats: 10
+
+    lime:
+      enabled: false  # CPU intensive
+      n_samples: 1000
+      kernel_width: 0.75
+
+  visualization:
+    plot_attention_maps: true
+    plot_feature_importance: true
+    plot_shap_summary: true
+    plot_embeddings: true  # t-SNE/UMAP
+    save_format: png  # 'png', 'svg', 'pdf'
+
+# Data Preprocessing
+preprocessing:
+  # Feature Engineering
+  features:
+    lag_features:
+      enabled: true
+      lags: [1, 3, 7, 14, 30]  # days
+
+    rolling_features:
+      enabled: true
+      windows: [7, 14, 30, 90]  # days
+      functions:
+        - mean
+        - std
+        - min
+        - max
+
+    trend_features:
+      enabled: true
+      methods:
+        - linear_trend
+        - exponential_smoothing
+
+    cyclical_features:
+      enabled: true
+      encode_time:
+        - day_of_week
+        - day_of_month
+        - month
+        - quarter
+
+  # Normalization
+  normalization:
+    method: standard  # 'standard', 'minmax', 'robust', 'none'
+    per_feature: true
+    clip_outliers: true
+    clip_sigma: 3.0
+
+  # Missing Data
+  missing_data:
+    strategy: forward_fill  # 'forward_fill', 'backward_fill', 'interpolate', 'mean', 'median'
+    max_gap: 7  # days
+    drop_threshold: 0.5  # drop features with >50% missing
+
+# Evaluation Metrics
+evaluation:
+  forecasting:
+    - mae
+    - rmse
+    - mape
+    - smape
+    - mase
+    - quantile_loss
+    - coverage
+
+  anomaly:
+    - precision
+    - recall
+    - f1_score
+    - auc_roc
+    - auc_pr
+    - false_positive_rate
+
+  risk_prediction:
+    - brier_score
+    - log_loss
+    - calibration_error
+
+# Production Settings
+production:
+  batch_inference: true
+  batch_size: 128
+  num_workers: 4
+  prefetch_factor: 2
+
+  monitoring:
+    track_drift: true
+    drift_detection_window: 30  # days
+    performance_degradation_threshold: 0.15
+    alert_on_degradation: true
+
+  retraining:
+    schedule: quarterly
+    trigger_on_drift: true
+    min_new_samples: 1000
+    validation_threshold: 0.85  # model must achieve this score
