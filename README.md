@@ -263,9 +263,6 @@ jupyter notebook notebooks/01_data_exploration.ipynb
 - [ ] Explainability dashboard
 - [ ] Documentation & PRD alignment
 
-## Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ### Development Setup
 ```bash
@@ -300,11 +297,6 @@ If you use PI-ERE in your research or operations, please cite:
 }
 ```
 
-## Contact & Support
-
-- **Issues**: [GitHub Issues](https://github.com/your-org/pi-ere/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/pi-ere/discussions)
-- **Email**: pi-ere-support@your-org.com
 
 ## Acknowledgments
 
