@@ -754,6 +754,7 @@ def report(region, input_file, output_dir):
         logger.info("Step 2/5: Running anomaly detection...")
         logger.info("-" * 80)
         detector = AnomalyDetector(methods=['residual', 'isolation_forest'])
+        detector.fit(region_data)  # Fit detector to establish baselines
         anomalies = detector.detect(region_data)
         logger.info(f"Anomalies detected: {len(anomalies)}")
 
@@ -773,10 +774,22 @@ def report(region, input_file, output_dir):
         logger.info("\n" + "-" * 80)
         logger.info("Step 4/5: Creating explanations...")
         logger.info("-" * 80)
+
+        # Pivot region_data from long to wide format for explainability
+        # ExplainabilityEngine expects wide format with features as columns
+        wide_data = region_data.pivot_table(
+            index='date',
+            columns='feature_name',
+            values='value',
+            aggfunc='mean'
+        )
+        wide_data.index = pd.to_datetime(wide_data.index)
+        wide_data = wide_data.sort_index().fillna(method='ffill').fillna(method='bfill')
+
         explainer = ExplainabilityEngine()
         explanation = explainer.explain_forecast(
             forecast=forecast_result,
-            data=region_data
+            data=wide_data
         )
         logger.info("Explanations created")
 
