@@ -20,6 +20,10 @@ from pi_ere.data.sources import ACLEDSource, CommoditiesSource, GDELTSource, Wor
 from pi_ere.data.harmonize import DataHarmonizer
 from pi_ere.embeddings import TextEmbedder, TimeSeriesEmbedder
 from pi_ere.utils.config import config
+from pi_ere.models import RiskForecaster, RiskForecast
+from pi_ere.vector_db import SimilaritySearch
+from pi_ere.anomaly import AnomalyDetector, EarlyWarningSystem
+from pi_ere.reporting import ExplainabilityEngine, RiskVisualizer
 
 
 # Configure logger
@@ -356,6 +360,405 @@ def update(days):
 
     for source_name, df in results.items():
         logger.info(f"{source_name}: {len(df)} new records")
+
+
+@cli.command()
+@click.option(
+    '--region',
+    '-r',
+    required=True,
+    help='Region code to forecast (e.g., COD, MLI)'
+)
+@click.option(
+    '--input-file',
+    '-i',
+    type=click.Path(exists=True),
+    required=True,
+    help='Harmonized data file'
+)
+@click.option(
+    '--horizon',
+    '-h',
+    type=int,
+    default=6,
+    help='Forecast horizon in months'
+)
+@click.option(
+    '--output',
+    '-o',
+    type=click.Path(),
+    help='Output file for forecast results'
+)
+def forecast(region, input_file, horizon, output):
+    """Generate risk forecasts for a specific region.
+
+    Examples:
+        # Forecast 6 months ahead for DRC
+        python run_extractive_risk_pipeline.py forecast -r COD -i harmonized_data.parquet
+
+        # Forecast 12 months with custom output
+        python run_extractive_risk_pipeline.py forecast -r MLI -i harmonized_data.parquet -h 12 -o forecast_mali.json
+    """
+    logger.info("=" * 80)
+    logger.info("PI-ERE RISK FORECASTING")
+    logger.info("=" * 80)
+
+    try:
+        # Load harmonized data
+        import pandas as pd
+        logger.info(f"Loading data from {input_file}")
+        df = pd.read_parquet(input_file)
+
+        # Filter for target region
+        region_data = df[df['region'] == region]
+        if region_data.empty:
+            logger.error(f"No data found for region: {region}")
+            return
+
+        logger.info(f"Region: {region}")
+        logger.info(f"Forecast horizon: {horizon} months")
+        logger.info(f"Data records: {len(region_data)}")
+
+        # Initialize forecaster
+        logger.info("Initializing risk forecaster...")
+        forecaster = RiskForecaster()
+
+        # Generate forecast
+        logger.info(f"Generating {horizon}-month forecast...")
+        forecast_result = forecaster.forecast(
+            data=region_data,
+            region=region,
+            horizon=horizon
+        )
+
+        # Save results if output specified
+        if output:
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            logger.info(f"Saving forecast to {output}")
+            forecast_result.save(output_path)
+
+        # Summary
+        logger.info("\n" + "=" * 80)
+        logger.info("FORECAST SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"Region: {region}")
+        logger.info(f"Forecast horizon: {horizon} months")
+        logger.info(f"Mean risk score: {forecast_result.mean_risk:.3f}")
+        logger.info(f"Risk trend: {forecast_result.trend}")
+        logger.info("\nForecasting complete!")
+
+    except Exception as e:
+        logger.error(f"Error during forecasting: {e}")
+        raise
+
+
+@cli.command()
+@click.option(
+    '--input-file',
+    '-i',
+    type=click.Path(exists=True),
+    required=True,
+    help='Harmonized data file'
+)
+@click.option(
+    '--region',
+    '-r',
+    help='Region to analyze (optional, all regions if not specified)'
+)
+@click.option(
+    '--methods',
+    default='residual,isolation_forest',
+    help='Comma-separated detection methods (default: residual,isolation_forest)'
+)
+@click.option(
+    '--output',
+    '-o',
+    type=click.Path(),
+    help='Output file for anomaly results'
+)
+def detect_anomalies(input_file, region, methods, output):
+    """Run anomaly detection on harmonized data.
+
+    Examples:
+        # Detect anomalies for all regions
+        python run_extractive_risk_pipeline.py detect-anomalies -i harmonized_data.parquet
+
+        # Detect for specific region
+        python run_extractive_risk_pipeline.py detect-anomalies -i harmonized_data.parquet -r COD
+
+        # Custom methods and output
+        python run_extractive_risk_pipeline.py detect-anomalies -i harmonized_data.parquet --methods residual,isolation_forest,lof -o anomalies.json
+    """
+    logger.info("=" * 80)
+    logger.info("PI-ERE ANOMALY DETECTION")
+    logger.info("=" * 80)
+
+    try:
+        # Load harmonized data
+        import pandas as pd
+        logger.info(f"Loading data from {input_file}")
+        df = pd.read_parquet(input_file)
+
+        # Filter for region if specified
+        if region:
+            df = df[df['region'] == region]
+            if df.empty:
+                logger.error(f"No data found for region: {region}")
+                return
+            logger.info(f"Region: {region}")
+        else:
+            logger.info(f"Analyzing all regions: {df['region'].nunique()} regions")
+
+        # Parse methods
+        method_list = [m.strip() for m in methods.split(',')]
+        logger.info(f"Detection methods: {', '.join(method_list)}")
+
+        # Initialize detector
+        logger.info("Initializing anomaly detector...")
+        detector = AnomalyDetector(methods=method_list)
+
+        # Detect anomalies
+        logger.info("Running anomaly detection...")
+        anomalies = detector.detect(df)
+
+        # Save results if output specified
+        if output:
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            logger.info(f"Saving anomalies to {output}")
+            anomalies.to_json(output_path, orient='records', indent=2)
+
+        # Summary
+        logger.info("\n" + "=" * 80)
+        logger.info("ANOMALY DETECTION SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"Total anomalies detected: {len(anomalies)}")
+
+        if not anomalies.empty:
+            logger.info(f"Regions affected: {anomalies['region'].nunique()}")
+            logger.info(f"Date range: {anomalies['date'].min()} to {anomalies['date'].max()}")
+
+            # Top anomalies by severity
+            if 'severity' in anomalies.columns:
+                logger.info("\nTop 5 anomalies by severity:")
+                top_anomalies = anomalies.nlargest(5, 'severity')
+                for _, row in top_anomalies.iterrows():
+                    logger.info(f"  {row['date']} - {row['region']}: {row['feature_name']} (severity: {row['severity']:.3f})")
+
+        logger.info("\nAnomaly detection complete!")
+
+    except Exception as e:
+        logger.error(f"Error during anomaly detection: {e}")
+        raise
+
+
+@cli.command()
+@click.option(
+    '--region',
+    '-r',
+    required=True,
+    help='Target region to find analogues for'
+)
+@click.option(
+    '--embeddings-file',
+    '-e',
+    type=click.Path(exists=True),
+    required=True,
+    help='Embeddings file'
+)
+@click.option(
+    '--top-k',
+    '-k',
+    type=int,
+    default=10,
+    help='Number of analogues to return'
+)
+def find_analogues(region, embeddings_file, top_k):
+    """Find historical analogues for a region.
+
+    Uses similarity search over embeddings to identify historical periods
+    or other regions with similar risk profiles.
+
+    Examples:
+        # Find top 10 analogues for DRC
+        python run_extractive_risk_pipeline.py find-analogues -r COD -e embeddings.npz
+
+        # Find top 20 analogues
+        python run_extractive_risk_pipeline.py find-analogues -r MLI -e embeddings.npz -k 20
+    """
+    logger.info("=" * 80)
+    logger.info("PI-ERE ANALOGUE SEARCH")
+    logger.info("=" * 80)
+
+    try:
+        logger.info(f"Target region: {region}")
+        logger.info(f"Embeddings file: {embeddings_file}")
+        logger.info(f"Number of analogues: {top_k}")
+
+        # Initialize similarity search
+        logger.info("Loading embeddings and initializing similarity search...")
+        similarity_search = SimilaritySearch(embeddings_file=embeddings_file)
+
+        # Find analogues
+        logger.info(f"Searching for top {top_k} analogues...")
+        analogues = similarity_search.find_similar(
+            query_region=region,
+            top_k=top_k
+        )
+
+        # Summary
+        logger.info("\n" + "=" * 80)
+        logger.info("ANALOGUE SEARCH RESULTS")
+        logger.info("=" * 80)
+        logger.info(f"Target region: {region}")
+        logger.info(f"\nTop {top_k} analogues:")
+
+        for i, analogue in enumerate(analogues, 1):
+            logger.info(f"\n{i}. {analogue['region']} ({analogue['period']})")
+            logger.info(f"   Similarity: {analogue['similarity']:.3f}")
+            logger.info(f"   Description: {analogue.get('description', 'N/A')}")
+
+        logger.info("\nAnalogue search complete!")
+
+    except Exception as e:
+        logger.error(f"Error during analogue search: {e}")
+        raise
+
+
+@cli.command()
+@click.option(
+    '--region',
+    '-r',
+    required=True,
+    help='Region code for report'
+)
+@click.option(
+    '--input-file',
+    '-i',
+    type=click.Path(exists=True),
+    required=True,
+    help='Harmonized data file'
+)
+@click.option(
+    '--output-dir',
+    '-o',
+    type=click.Path(),
+    default='reports/',
+    help='Output directory for report'
+)
+def report(region, input_file, output_dir):
+    """Generate full risk report for a region.
+
+    Orchestrates the complete pipeline: forecasting, anomaly detection,
+    early warning signals, and explanation generation. Produces an HTML report.
+
+    Examples:
+        # Generate report for DRC
+        python run_extractive_risk_pipeline.py report -r COD -i harmonized_data.parquet
+
+        # Generate report with custom output directory
+        python run_extractive_risk_pipeline.py report -r MLI -i harmonized_data.parquet -o custom_reports/
+    """
+    logger.info("=" * 80)
+    logger.info("PI-ERE RISK REPORT GENERATION")
+    logger.info("=" * 80)
+
+    try:
+        # Setup output directory
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        # Load harmonized data
+        import pandas as pd
+        logger.info(f"Loading data from {input_file}")
+        df = pd.read_parquet(input_file)
+
+        # Filter for target region
+        region_data = df[df['region'] == region]
+        if region_data.empty:
+            logger.error(f"No data found for region: {region}")
+            return
+
+        logger.info(f"Region: {region}")
+        logger.info(f"Data records: {len(region_data)}")
+
+        # Step 1: Generate forecast
+        logger.info("\n" + "-" * 80)
+        logger.info("Step 1/5: Generating risk forecast...")
+        logger.info("-" * 80)
+        forecaster = RiskForecaster()
+        forecast_result = forecaster.forecast(
+            data=region_data,
+            region=region,
+            horizon=6
+        )
+        logger.info(f"Forecast generated: Mean risk = {forecast_result.mean_risk:.3f}")
+
+        # Step 2: Run anomaly detection
+        logger.info("\n" + "-" * 80)
+        logger.info("Step 2/5: Running anomaly detection...")
+        logger.info("-" * 80)
+        detector = AnomalyDetector(methods=['residual', 'isolation_forest'])
+        anomalies = detector.detect(region_data)
+        logger.info(f"Anomalies detected: {len(anomalies)}")
+
+        # Step 3: Generate early warning alerts
+        logger.info("\n" + "-" * 80)
+        logger.info("Step 3/5: Generating early warning alerts...")
+        logger.info("-" * 80)
+        early_warning = EarlyWarningSystem()
+        alerts = early_warning.generate_alerts(
+            forecast=forecast_result,
+            anomalies=anomalies,
+            region=region
+        )
+        logger.info(f"Alerts generated: {len(alerts)}")
+
+        # Step 4: Create explanations
+        logger.info("\n" + "-" * 80)
+        logger.info("Step 4/5: Creating explanations...")
+        logger.info("-" * 80)
+        explainer = ExplainabilityEngine()
+        explanations = explainer.explain(
+            forecast=forecast_result,
+            anomalies=anomalies,
+            data=region_data
+        )
+        logger.info("Explanations created")
+
+        # Step 5: Export HTML report
+        logger.info("\n" + "-" * 80)
+        logger.info("Step 5/5: Exporting HTML report...")
+        logger.info("-" * 80)
+        visualizer = RiskVisualizer()
+        report_file = visualizer.create_report(
+            region=region,
+            forecast=forecast_result,
+            anomalies=anomalies,
+            alerts=alerts,
+            explanations=explanations,
+            output_dir=output_path
+        )
+        logger.info(f"Report saved to: {report_file}")
+
+        # Summary
+        logger.info("\n" + "=" * 80)
+        logger.info("REPORT SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"Region: {region}")
+        logger.info(f"Forecast horizon: 6 months")
+        logger.info(f"Mean risk score: {forecast_result.mean_risk:.3f}")
+        logger.info(f"Anomalies detected: {len(anomalies)}")
+        logger.info(f"Alerts generated: {len(alerts)}")
+        logger.info(f"\nReport location: {report_file}")
+        logger.info("\nReport generation complete!")
+
+    except Exception as e:
+        logger.error(f"Error during report generation: {e}")
+        raise
 
 
 if __name__ == '__main__':
