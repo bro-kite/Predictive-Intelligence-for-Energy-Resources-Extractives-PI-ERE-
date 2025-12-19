@@ -19,23 +19,27 @@ from pi_ere.data.ingest import DataSource
 class ACLEDSource(DataSource):
     """Connector for ACLED conflict and protest data.
 
-    API Documentation: https://acleddata.com/resources/general-guides/
+    API Documentation: https://acleddata.com/api-documentation/
+    Uses OAuth authentication with email/password.
     """
 
     def __init__(self):
         """Initialize ACLED data source."""
         super().__init__(name='acled')
 
-        self.api_key = os.getenv(self.config.get('api_key_env', 'ACLED_API_KEY'))
         self.email = os.getenv('ACLED_EMAIL', '')
+        self.password = os.getenv('ACLED_PASSWORD', '')
+        self.oauth_url = 'https://acleddata.com/oauth/token'
         self.base_url = self.config.get(
             'base_url',
-            'https://api.acleddata.com/acled/read'
+            'https://acleddata.com/api/acled/read'
         )
+        self._access_token = None
+        self._token_expiry = None
 
-        if not self.api_key:
+        if not self.email or not self.password:
             logger.warning(
-                "ACLED API key not found. Set ACLED_API_KEY environment variable."
+                "ACLED credentials not found. Set ACLED_EMAIL and ACLED_PASSWORD environment variables."
             )
 
         # Event type mapping
@@ -47,6 +51,45 @@ class ACLEDSource(DataSource):
             'Riots',
             'Strategic developments',
         ])
+
+    def _get_access_token(self) -> Optional[str]:
+        """Get OAuth access token, refreshing if needed.
+
+        Returns:
+            Access token string or None if authentication fails
+        """
+        # Check if we have a valid cached token
+        if self._access_token and self._token_expiry:
+            if datetime.now() < self._token_expiry:
+                return self._access_token
+
+        # Request new token
+        try:
+            response = requests.post(
+                self.oauth_url,
+                data={
+                    'username': self.email,
+                    'password': self.password,
+                    'grant_type': 'password',
+                    'client_id': 'acled',
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+
+            token_data = response.json()
+            self._access_token = token_data.get('access_token')
+
+            # Token is valid for 24 hours, we'll refresh after 23 hours
+            from datetime import timedelta
+            self._token_expiry = datetime.now() + timedelta(hours=23)
+
+            logger.info("Successfully obtained ACLED access token")
+            return self._access_token
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to obtain ACLED access token: {e}")
+            return None
 
     def fetch(
         self,
@@ -72,8 +115,14 @@ class ACLEDSource(DataSource):
             logger.warning("ACLED source is disabled")
             return pd.DataFrame()
 
-        if not self.api_key:
-            logger.error("Cannot fetch ACLED data without API key")
+        if not self.email or not self.password:
+            logger.error("Cannot fetch ACLED data without credentials. Set ACLED_EMAIL and ACLED_PASSWORD.")
+            return pd.DataFrame()
+
+        # Get access token
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Failed to authenticate with ACLED API")
             return pd.DataFrame()
 
         event_types = event_types or self.event_types
@@ -96,6 +145,7 @@ class ACLEDSource(DataSource):
                     start_date=start_date,
                     end_date=end_date,
                     event_types=event_types,
+                    access_token=access_token,
                 )
                 if not df.empty:
                     all_data.append(df)
@@ -127,6 +177,7 @@ class ACLEDSource(DataSource):
         start_date: datetime,
         end_date: datetime,
         event_types: List[str],
+        access_token: str,
         limit: int = 5000,
     ) -> pd.DataFrame:
         """Fetch ACLED data for a single region.
@@ -136,14 +187,13 @@ class ACLEDSource(DataSource):
             start_date: Start date
             end_date: End date
             event_types: Event types to fetch
+            access_token: OAuth access token
             limit: Maximum records per request
 
         Returns:
             DataFrame with events for this region
         """
         params = {
-            'key': self.api_key,
-            'email': self.email,
             'iso': region,
             'event_date': f"{start_date.strftime('%Y-%m-%d')}|{end_date.strftime('%Y-%m-%d')}",
             'event_date_where': 'BETWEEN',
@@ -154,8 +204,12 @@ class ACLEDSource(DataSource):
         if event_types:
             params['event_type'] = '|'.join(event_types)
 
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+        }
+
         try:
-            response = requests.get(self.base_url, params=params, timeout=30)
+            response = requests.get(self.base_url, params=params, headers=headers, timeout=30)
             response.raise_for_status()
 
             data = response.json()

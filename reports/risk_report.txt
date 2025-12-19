@@ -1,0 +1,68 @@
+
+================================================================================
+                    PI-ERE RISK INTELLIGENCE REPORT
+                    Generated: 2025-12-19 18:03:51
+================================================================================
+
+EXECUTIVE SUMMARY
+-----------------
+This report provides an end-to-end risk assessment for extractive industry
+operations using the PI-ERE (Predictive Intelligence for Energy Resources
+Extractives) framework.
+
+DATA SOURCES
+------------
+- Commodity Prices: FRED API (Oil WTI, Oil Brent, Copper, Natural Gas, Coal)
+- Event Data: Synthetic data for demonstration (ACLED API pending approval)
+- Time Period: 2023-01-01 to 2024-12-01
+
+REGIONS ANALYZED
+----------------
+COD, IRQ, MOZ, NGA, VEN
+
+DATA SUMMARY
+------------
+- Total Records: 2,948
+- Total Events Processed: 12,792
+- Total Fatalities (simulated): 20,989
+- Embedding Dimensions: 320
+
+FORECAST SUMMARY (90-Day Outlook)
+---------------------------------
+  COD: 0.176 -> 0.300 (↑ INCREASING)
+  IRQ: 0.194 -> 0.330 (↑ INCREASING)
+  MOZ: 0.154 -> 0.234 (↑ INCREASING)
+  NGA: 0.131 -> 0.190 (↑ INCREASING)
+  VEN: 0.094 -> 0.137 (↑ INCREASING)
+
+ANOMALY DETECTION RESULTS
+-------------------------
+Total anomalies detected: 196
+Methods used: Isolation Forest, Residual Analysis, Embedding Drift
+
+By region:
+  COD: 30 anomalies
+  IRQ: 48 anomalies
+  MOZ: 13 anomalies
+  NGA: 32 anomalies
+  VEN: 73 anomalies
+
+ACTIVE ALERTS
+-------------
+Total critical alerts: 25
+  COD: 5 critical alerts
+  IRQ: 5 critical alerts
+  MOZ: 5 critical alerts
+  NGA: 5 critical alerts
+  VEN: 5 critical alerts
+
+RECOMMENDATIONS
+---------------
+1. Monitor regions with rising forecast trends (IRQ, COD, MOZ)
+2. Investigate multi-feature anomalies flagged by Isolation Forest
+3. Review commodity price correlations with regional risk scores
+4. Consider additional data sources once ACLED API access is approved
+
+================================================================================
+                    END OF REPORT
+================================================================================

@@ -1,10 +1,11 @@
 # Data Sources Configuration for PI-ERE
 
 # ACLED: Armed Conflict Location & Event Data Project
+# Uses OAuth authentication - set ACLED_EMAIL and ACLED_PASSWORD in .env
 acled:
   enabled: true
-  api_key_env: ACLED_API_KEY  # Set this in .env file
-  base_url: https://api.acleddata.com/acled/read
+  oauth_url: https://acleddata.com/oauth/token
+  base_url: https://acleddata.com/api/acled/read
   update_frequency: weekly
   event_types:
     - Battles

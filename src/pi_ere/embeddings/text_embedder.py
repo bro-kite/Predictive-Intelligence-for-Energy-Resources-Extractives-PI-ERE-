@@ -5,7 +5,7 @@ textual data sources using pre-trained sentence transformer models.
 """
 
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
