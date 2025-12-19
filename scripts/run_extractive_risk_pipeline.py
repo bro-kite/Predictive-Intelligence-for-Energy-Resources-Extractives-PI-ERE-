@@ -424,13 +424,15 @@ def forecast(region, input_file, horizon, output):
         logger.info("Initializing risk forecaster...")
         forecaster = RiskForecaster()
 
-        # Generate forecast
-        logger.info(f"Generating {horizon}-month forecast...")
-        forecast_result = forecaster.forecast(
-            data=region_data,
-            region=region,
-            horizon=horizon
-        )
+        # Fit and generate forecast
+        logger.info(f"Fitting model and generating {horizon}-month forecast...")
+        forecaster.fit(df, region)  # Fit on full harmonized data
+        forecast_result = forecaster.predict_risk(region, horizon_months=horizon)
+
+        # Compute summary stats
+        mean_risk = forecast_result.risk_scores['score'].mean()
+        risk_scores = forecast_result.risk_scores['score'].values
+        trend = "increasing" if len(risk_scores) > 1 and risk_scores[-1] > risk_scores[0] else "stable/decreasing"
 
         # Save results if output specified
         if output:
@@ -438,7 +440,7 @@ def forecast(region, input_file, horizon, output):
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
             logger.info(f"Saving forecast to {output}")
-            forecast_result.save(output_path)
+            forecast_result.risk_scores.to_parquet(output_path)
 
         # Summary
         logger.info("\n" + "=" * 80)
@@ -446,8 +448,8 @@ def forecast(region, input_file, horizon, output):
         logger.info("=" * 80)
         logger.info(f"Region: {region}")
         logger.info(f"Forecast horizon: {horizon} months")
-        logger.info(f"Mean risk score: {forecast_result.mean_risk:.3f}")
-        logger.info(f"Risk trend: {forecast_result.trend}")
+        logger.info(f"Mean risk score: {mean_risk:.3f}")
+        logger.info(f"Risk trend: {trend}")
         logger.info("\nForecasting complete!")
 
     except Exception as e:
@@ -516,9 +518,12 @@ def detect_anomalies(input_file, region, methods, output):
         method_list = [m.strip() for m in methods.split(',')]
         logger.info(f"Detection methods: {', '.join(method_list)}")
 
-        # Initialize detector
+        # Initialize and fit detector
         logger.info("Initializing anomaly detector...")
         detector = AnomalyDetector(methods=method_list)
+
+        logger.info("Fitting detector on historical data...")
+        detector.fit(df)
 
         # Detect anomalies
         logger.info("Running anomaly detection...")
@@ -782,12 +787,12 @@ def report(region, input_file, output_dir):
         visualizer = RiskVisualizer()
 
         # Create dashboard figure
-        feature_importance = explanation.feature_importance if hasattr(explanation, 'feature_importance') else None
+        feature_weights = explanation.feature_weights if hasattr(explanation, 'feature_weights') else None
         dashboard_fig = visualizer.create_region_dashboard(
             region=region,
             forecast=forecast_result,
             alerts=alerts,
-            explanation=feature_importance
+            explanation=feature_weights
         )
 
         # Export to HTML
