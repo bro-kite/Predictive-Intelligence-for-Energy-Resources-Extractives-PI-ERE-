@@ -120,7 +120,7 @@ class EarlyWarningSystem:
 
         # 1. Detect anomalies using detector
         if self.detector is not None and not data.empty:
-            anomalies = self.detector.detect_anomalies(data, region=region)
+            anomalies = self.detector.detect(data, current_embedding=embedding)
 
             for anomaly in anomalies:
                 alert = self._create_anomaly_alert(

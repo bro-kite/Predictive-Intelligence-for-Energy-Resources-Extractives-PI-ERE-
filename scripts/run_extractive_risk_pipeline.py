@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import click
+import matplotlib.pyplot as plt
 from loguru import logger
 
 # Add src to path
@@ -521,7 +522,20 @@ def detect_anomalies(input_file, region, methods, output):
 
         # Detect anomalies
         logger.info("Running anomaly detection...")
-        anomalies = detector.detect(df)
+        anomaly_list = detector.detect(df)
+
+        # Convert list of Anomaly objects to DataFrame
+        anomalies = pd.DataFrame([
+            {
+                'timestamp': a.timestamp,
+                'anomaly_type': a.anomaly_type,
+                'feature': a.feature,
+                'severity': a.severity,
+                'description': a.description,
+                'raw_score': a.raw_score
+            }
+            for a in anomaly_list
+        ])
 
         # Save results if output specified
         if output:
@@ -537,16 +551,15 @@ def detect_anomalies(input_file, region, methods, output):
         logger.info("=" * 80)
         logger.info(f"Total anomalies detected: {len(anomalies)}")
 
-        if not anomalies.empty:
-            logger.info(f"Regions affected: {anomalies['region'].nunique()}")
-            logger.info(f"Date range: {anomalies['date'].min()} to {anomalies['date'].max()}")
+        if len(anomalies) > 0:
+            logger.info(f"Anomaly types: {anomalies['anomaly_type'].value_counts().to_dict()}")
 
             # Top anomalies by severity
             if 'severity' in anomalies.columns:
                 logger.info("\nTop 5 anomalies by severity:")
                 top_anomalies = anomalies.nlargest(5, 'severity')
                 for _, row in top_anomalies.iterrows():
-                    logger.info(f"  {row['date']} - {row['region']}: {row['feature_name']} (severity: {row['severity']:.3f})")
+                    logger.info(f"  {row['anomaly_type']}: {row['feature']} (severity: {row['severity']:.3f})")
 
         logger.info("\nAnomaly detection complete!")
 
@@ -598,15 +611,51 @@ def find_analogues(region, embeddings_file, top_k):
         logger.info(f"Embeddings file: {embeddings_file}")
         logger.info(f"Number of analogues: {top_k}")
 
+        # Load embeddings and metadata
+        logger.info("Loading embeddings...")
+        embeddings_path = Path(embeddings_file)
+
+        if embeddings_path.suffix == '.npz':
+            data = np.load(embeddings_path, allow_pickle=True)
+            embeddings = data['embeddings']
+            metadata = pd.DataFrame(data['metadata'].item()) if 'metadata' in data else None
+        elif embeddings_path.suffix == '.npy':
+            embeddings = np.load(embeddings_path)
+            # Try to load metadata from companion file
+            metadata_path = embeddings_path.parent / 'ts_metadata.parquet'
+            metadata = pd.read_parquet(metadata_path) if metadata_path.exists() else None
+        else:
+            raise ValueError(f"Unsupported embeddings format: {embeddings_path.suffix}")
+
         # Initialize similarity search
-        logger.info("Loading embeddings and initializing similarity search...")
-        similarity_search = SimilaritySearch(embeddings_file=embeddings_file)
+        logger.info("Initializing similarity search index...")
+        embedding_dim = embeddings.shape[1]
+        similarity_search = SimilaritySearch(embedding_dim=embedding_dim)
+
+        # Add embeddings to index
+        if metadata is not None:
+            ids = [f"{r}_{d}" for r, d in zip(metadata['region'], metadata['date'])]
+            similarity_search.add_embeddings(ids, embeddings, metadata)
+            logger.info(f"Added {len(embeddings)} embeddings to index")
+
+        # Get query embedding (latest for target region)
+        if metadata is not None:
+            region_mask = metadata['region'] == region
+            if not region_mask.any():
+                logger.error(f"No embeddings found for region: {region}")
+                return
+            region_embeddings = embeddings[region_mask]
+            query_embedding = region_embeddings[-1]  # Latest
+        else:
+            logger.error("Cannot search without metadata")
+            return
 
         # Find analogues
         logger.info(f"Searching for top {top_k} analogues...")
-        analogues = similarity_search.find_similar(
-            query_region=region,
-            top_k=top_k
+        analogues = similarity_search.find_analogues(
+            region=region,
+            current_embedding=query_embedding,
+            exclude_recent_days=90
         )
 
         # Summary
@@ -614,12 +663,12 @@ def find_analogues(region, embeddings_file, top_k):
         logger.info("ANALOGUE SEARCH RESULTS")
         logger.info("=" * 80)
         logger.info(f"Target region: {region}")
-        logger.info(f"\nTop {top_k} analogues:")
+        logger.info(f"\nTop {len(analogues)} analogues:")
 
-        for i, analogue in enumerate(analogues, 1):
-            logger.info(f"\n{i}. {analogue['region']} ({analogue['period']})")
-            logger.info(f"   Similarity: {analogue['similarity']:.3f}")
-            logger.info(f"   Description: {analogue.get('description', 'N/A')}")
+        for i, analogue in enumerate(analogues[:top_k], 1):
+            logger.info(f"\n{i}. {analogue.region} ({analogue.start_date.strftime('%Y-%m-%d')})")
+            logger.info(f"   Similarity: {analogue.similarity_score:.3f}")
+            logger.info(f"   Outcome: {analogue.outcome}")
 
         logger.info("\nAnalogue search complete!")
 
@@ -690,12 +739,10 @@ def report(region, input_file, output_dir):
         logger.info("Step 1/5: Generating risk forecast...")
         logger.info("-" * 80)
         forecaster = RiskForecaster()
-        forecast_result = forecaster.forecast(
-            data=region_data,
-            region=region,
-            horizon=6
-        )
-        logger.info(f"Forecast generated: Mean risk = {forecast_result.mean_risk:.3f}")
+        forecaster.fit(df, region)  # Fit on full harmonized data
+        forecast_result = forecaster.predict_risk(region, horizon_months=6)
+        mean_risk = forecast_result.risk_scores['score'].mean()
+        logger.info(f"Forecast generated: Mean risk = {mean_risk:.3f}")
 
         # Step 2: Run anomaly detection
         logger.info("\n" + "-" * 80)
@@ -710,10 +757,10 @@ def report(region, input_file, output_dir):
         logger.info("Step 3/5: Generating early warning alerts...")
         logger.info("-" * 80)
         early_warning = EarlyWarningSystem()
-        alerts = early_warning.generate_alerts(
-            forecast=forecast_result,
-            anomalies=anomalies,
-            region=region
+        alerts = early_warning.analyze(
+            region=region,
+            data=region_data,
+            forecast=forecast_result
         )
         logger.info(f"Alerts generated: {len(alerts)}")
 
@@ -722,9 +769,8 @@ def report(region, input_file, output_dir):
         logger.info("Step 4/5: Creating explanations...")
         logger.info("-" * 80)
         explainer = ExplainabilityEngine()
-        explanations = explainer.explain(
+        explanation = explainer.explain_forecast(
             forecast=forecast_result,
-            anomalies=anomalies,
             data=region_data
         )
         logger.info("Explanations created")
@@ -734,14 +780,23 @@ def report(region, input_file, output_dir):
         logger.info("Step 5/5: Exporting HTML report...")
         logger.info("-" * 80)
         visualizer = RiskVisualizer()
-        report_file = visualizer.create_report(
+
+        # Create dashboard figure
+        feature_importance = explanation.feature_importance if hasattr(explanation, 'feature_importance') else None
+        dashboard_fig = visualizer.create_region_dashboard(
             region=region,
             forecast=forecast_result,
-            anomalies=anomalies,
             alerts=alerts,
-            explanations=explanations,
+            explanation=feature_importance
+        )
+
+        # Export to HTML
+        report_file = visualizer.export_html_report(
+            region=region,
+            figures={'dashboard': dashboard_fig},
             output_dir=output_path
         )
+        plt.close(dashboard_fig)  # Clean up
         logger.info(f"Report saved to: {report_file}")
 
         # Summary
@@ -750,7 +805,7 @@ def report(region, input_file, output_dir):
         logger.info("=" * 80)
         logger.info(f"Region: {region}")
         logger.info(f"Forecast horizon: 6 months")
-        logger.info(f"Mean risk score: {forecast_result.mean_risk:.3f}")
+        logger.info(f"Mean risk score: {mean_risk:.3f}")
         logger.info(f"Anomalies detected: {len(anomalies)}")
         logger.info(f"Alerts generated: {len(alerts)}")
         logger.info(f"\nReport location: {report_file}")
